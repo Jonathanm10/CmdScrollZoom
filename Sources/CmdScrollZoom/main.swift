@@ -12,7 +12,9 @@ private enum IOHIDPhase {
 private struct Config {
     var modifier: CGEventFlags = .maskCommand
     var sensitivity: Double = 0.012
+    var panSensitivity: Double = 1.0
     var invert: Bool = false
+    var invertPan: Bool = false
     var endDelay: TimeInterval = 0.08
     var diagnose = false
 }
@@ -24,6 +26,10 @@ private final class CmdScrollZoom {
     private var retryTimer: Timer?
     private var endingWorkItem: DispatchWorkItem?
     private var gestureIsActive = false
+    private var panIsActive = false
+    private var lastPanLocation: CGPoint?
+    private var panRemainderX = 0.0
+    private var panRemainderY = 0.0
     private var didLogWaitingForPermissions = false
 
     init(config: Config) {
@@ -56,6 +62,7 @@ private final class CmdScrollZoom {
     func stop() {
         retryTimer?.invalidate()
         retryTimer = nil
+        finishPanIfNeeded()
         finishGestureIfNeeded()
 
         if let eventTap {
@@ -82,7 +89,7 @@ private final class CmdScrollZoom {
     }
 
     private func logActive() {
-        print("cmd-scroll-zoom is active. \(modifierLabel(config.modifier)) + scroll wheel = pinch zoom.")
+        print("cmd-scroll-zoom is active. \(modifierLabel(config.modifier)) + scroll wheel = pinch zoom. Middle-button drag = pan.")
     }
 
     private func installEventTap() -> Bool {
@@ -90,7 +97,7 @@ private final class CmdScrollZoom {
             return true
         }
 
-        let mask = CGEventMask(1 << CGEventType.scrollWheel.rawValue)
+        let mask = eventMask(for: .scrollWheel, .otherMouseDown, .otherMouseUp, .otherMouseDragged)
         let refcon = Unmanaged.passUnretained(self).toOpaque()
 
         eventTap = CGEvent.tapCreate(
@@ -115,10 +122,39 @@ private final class CmdScrollZoom {
 
     fileprivate func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            finishPanIfNeeded()
+            finishGestureIfNeeded()
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
             }
             return Unmanaged.passUnretained(event)
+        }
+
+        switch type {
+        case .otherMouseDown:
+            guard isMiddleMouseEvent(event) else {
+                return Unmanaged.passUnretained(event)
+            }
+            finishGestureIfNeeded()
+            beginPan(at: event.location)
+            return nil
+
+        case .otherMouseDragged:
+            guard panIsActive else {
+                return Unmanaged.passUnretained(event)
+            }
+            updatePan(to: event.location)
+            return nil
+
+        case .otherMouseUp:
+            guard panIsActive, isMiddleMouseEvent(event) else {
+                return Unmanaged.passUnretained(event)
+            }
+            finishPanIfNeeded()
+            return nil
+
+        default:
+            break
         }
 
         guard type == .scrollWheel else {
@@ -187,6 +223,89 @@ private final class CmdScrollZoom {
         postMagnification(0, phase: IOHIDPhase.ended)
         gestureIsActive = false
     }
+
+    private func beginPan(at location: CGPoint) {
+        panIsActive = true
+        lastPanLocation = location
+        panRemainderX = 0
+        panRemainderY = 0
+    }
+
+    private func updatePan(to location: CGPoint) {
+        guard let previousLocation = lastPanLocation else {
+            lastPanLocation = location
+            return
+        }
+
+        lastPanLocation = location
+
+        let sign = config.invertPan ? -1.0 : 1.0
+        panRemainderX += Double(location.x - previousLocation.x) * config.panSensitivity * sign
+        panRemainderY += Double(location.y - previousLocation.y) * config.panSensitivity * sign
+
+        let horizontal = consumeScrollSteps(from: &panRemainderX)
+        let vertical = consumeScrollSteps(from: &panRemainderY)
+
+        guard horizontal != 0 || vertical != 0 else {
+            return
+        }
+
+        postScroll(vertical: vertical, horizontal: horizontal, at: location)
+    }
+
+    private func finishPanIfNeeded() {
+        guard panIsActive else {
+            return
+        }
+
+        panIsActive = false
+        lastPanLocation = nil
+        panRemainderX = 0
+        panRemainderY = 0
+    }
+
+    private func postScroll(vertical: Int32, horizontal: Int32, at location: CGPoint) {
+        guard let event = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .pixel,
+            wheelCount: 2,
+            wheel1: vertical,
+            wheel2: horizontal,
+            wheel3: 0
+        ) else {
+            return
+        }
+
+        event.location = location
+        event.post(tap: .cghidEventTap)
+    }
+}
+
+private func eventMask(for types: CGEventType...) -> CGEventMask {
+    types.reduce(CGEventMask(0)) { mask, type in
+        mask | (CGEventMask(1) << type.rawValue)
+    }
+}
+
+private func isMiddleMouseEvent(_ event: CGEvent) -> Bool {
+    event.getIntegerValueField(.mouseEventButtonNumber) == 2
+}
+
+private func consumeScrollSteps(from value: inout Double) -> Int32 {
+    guard abs(value) >= 1 else {
+        return 0
+    }
+
+    let whole = value.rounded(.towardZero)
+    value -= whole
+
+    if whole > Double(Int32.max) {
+        return Int32.max
+    }
+    if whole < Double(Int32.min) {
+        return Int32.min
+    }
+    return Int32(whole)
 }
 
 private func currentModifierFlags(event: CGEvent) -> CGEventFlags {
@@ -349,7 +468,7 @@ private func runDiagnostics(config: Config) -> Never {
     print("Executable: \(CommandLine.arguments.first ?? "<unknown>")")
     print("AX trusted: \(AXIsProcessTrusted())")
 
-    let mask = CGEventMask(1 << CGEventType.scrollWheel.rawValue)
+    let mask = eventMask(for: .scrollWheel, .otherMouseDown, .otherMouseUp, .otherMouseDragged)
     let tap = CGEvent.tapCreate(
         tap: .cgSessionEventTap,
         place: .headInsertEventTap,
@@ -367,6 +486,7 @@ private func runDiagnostics(config: Config) -> Never {
 
     print("Modifier: \(modifierLabel(config.modifier))")
     print("Sensitivity: \(config.sensitivity)")
+    print("Pan sensitivity: \(config.panSensitivity)")
     exit(tap == nil ? 1 : 0)
 }
 
@@ -390,8 +510,16 @@ private func parseConfig() -> Config {
             }
             args.removeFirst()
             config.sensitivity = number
+        case "--pan-sensitivity":
+            guard let value = args.first, let number = Double(value), number > 0 else {
+                usageAndExit()
+            }
+            args.removeFirst()
+            config.panSensitivity = number
         case "--invert":
             config.invert = true
+        case "--invert-pan":
+            config.invertPan = true
         case "--end-delay":
             guard let value = args.first, let number = Double(value), number > 0 else {
                 usageAndExit()
@@ -437,12 +565,14 @@ private func usageAndExit(status: Int32 = 2) -> Never {
     print(
         """
         Usage:
-          cmd-scroll-zoom [--modifier cmd|ctrl|option|shift] [--sensitivity 0.012] [--invert] [--end-delay 0.08] [--diagnose]
+          cmd-scroll-zoom [--modifier cmd|ctrl|option|shift] [--sensitivity 0.012] [--pan-sensitivity 1.0] [--invert] [--invert-pan] [--end-delay 0.08] [--diagnose]
 
         Examples:
           cmd-scroll-zoom
           cmd-scroll-zoom --modifier ctrl --sensitivity 0.018
+          cmd-scroll-zoom --pan-sensitivity 1.5
           cmd-scroll-zoom --invert
+          cmd-scroll-zoom --invert-pan
           cmd-scroll-zoom --diagnose
         """
     )

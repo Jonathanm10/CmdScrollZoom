@@ -8,9 +8,10 @@ It is meant for mice and apps that already support macOS pinch/magnification ges
 
 - Menu-bar-only macOS app.
 - `Command + vertical scroll` emits native magnification events.
+- Middle-button drag emits pixel scroll events for panning after zooming.
 - Horizontal scroll passes through unchanged.
 - Menu-bar actions for `Relaunch` and `Quit`.
-- Configurable modifier, sensitivity, inversion, and gesture end delay.
+- Configurable modifier, zoom sensitivity, pan sensitivity, inversion, and gesture end delay.
 - Diagnostic mode for Accessibility/event-tap troubleshooting.
 
 ## Requirements
@@ -91,14 +92,16 @@ Useful options:
 ```sh
 .build/release/cmd-scroll-zoom --modifier ctrl
 .build/release/cmd-scroll-zoom --sensitivity 0.018
+.build/release/cmd-scroll-zoom --pan-sensitivity 1.5
 .build/release/cmd-scroll-zoom --invert
+.build/release/cmd-scroll-zoom --invert-pan
 .build/release/cmd-scroll-zoom --diagnose
 ```
 
 Full usage:
 
 ```text
-cmd-scroll-zoom [--modifier cmd|ctrl|option|shift] [--sensitivity 0.012] [--invert] [--end-delay 0.08] [--diagnose]
+cmd-scroll-zoom [--modifier cmd|ctrl|option|shift] [--sensitivity 0.012] [--pan-sensitivity 1.0] [--invert] [--invert-pan] [--end-delay 0.08] [--diagnose]
 ```
 
 ## Limitations
