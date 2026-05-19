@@ -131,8 +131,12 @@ private final class CmdScrollZoom {
             return Unmanaged.passUnretained(event)
         }
 
-        let delta = scrollDelta(from: event)
+        let delta = verticalScrollDelta(from: event)
         guard delta != 0 else {
+            finishGestureIfNeeded()
+            if horizontalScrollDelta(from: event) != 0 {
+                return Unmanaged.passUnretained(event)
+            }
             return nil
         }
 
@@ -195,18 +199,41 @@ private func currentModifierFlags(event: CGEvent) -> CGEventFlags {
     return CGEventSource.flagsState(.hidSystemState).intersection(modifierMask)
 }
 
-private func scrollDelta(from event: CGEvent) -> Double {
-    let lineDelta = event.getIntegerValueField(.scrollWheelEventDeltaAxis1)
+private func verticalScrollDelta(from event: CGEvent) -> Double {
+    scrollDelta(
+        from: event,
+        lineField: .scrollWheelEventDeltaAxis1,
+        pointField: .scrollWheelEventPointDeltaAxis1,
+        fixedPointField: .scrollWheelEventFixedPtDeltaAxis1
+    )
+}
+
+private func horizontalScrollDelta(from event: CGEvent) -> Double {
+    scrollDelta(
+        from: event,
+        lineField: .scrollWheelEventDeltaAxis2,
+        pointField: .scrollWheelEventPointDeltaAxis2,
+        fixedPointField: .scrollWheelEventFixedPtDeltaAxis2
+    )
+}
+
+private func scrollDelta(
+    from event: CGEvent,
+    lineField: CGEventField,
+    pointField: CGEventField,
+    fixedPointField: CGEventField
+) -> Double {
+    let lineDelta = event.getIntegerValueField(lineField)
     if lineDelta != 0 {
         return Double(lineDelta)
     }
 
-    let pointDelta = event.getIntegerValueField(.scrollWheelEventPointDeltaAxis1)
+    let pointDelta = event.getIntegerValueField(pointField)
     if pointDelta != 0 {
         return Double(pointDelta) / 10
     }
 
-    let fixedPointDelta = event.getIntegerValueField(.scrollWheelEventFixedPtDeltaAxis1)
+    let fixedPointDelta = event.getIntegerValueField(fixedPointField)
     if fixedPointDelta != 0 {
         return Double(fixedPointDelta) / 65536
     }
@@ -225,18 +252,87 @@ private let eventTapCallback: CGEventTapCallBack = { _, type, event, userInfo in
 
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     private let zoom: CmdScrollZoom
+    private var statusItem: NSStatusItem?
 
     init(config: Config) {
         self.zoom = CmdScrollZoom(config: config)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installStatusItem()
         zoom.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         zoom.stop()
     }
+
+    private func installStatusItem() {
+        let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        statusItem = item
+
+        if let button = item.button {
+            if let image = NSImage(systemSymbolName: "plus.magnifyingglass", accessibilityDescription: "CmdScrollZoom") {
+                image.isTemplate = true
+                button.image = image
+            } else {
+                button.title = "CZ"
+            }
+        }
+
+        let menu = NSMenu()
+
+        let titleItem = NSMenuItem(title: "CmdScrollZoom Active", action: nil, keyEquivalent: "")
+        titleItem.isEnabled = false
+        menu.addItem(titleItem)
+
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "Relaunch", action: #selector(relaunchApp), keyEquivalent: "r"))
+        menu.addItem(NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q"))
+
+        for item in menu.items {
+            item.target = self
+        }
+
+        statusItem?.menu = menu
+    }
+
+    @objc private func relaunchApp() {
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let command = relaunchCommand(afterPID: pid)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", command]
+
+        do {
+            try process.run()
+        } catch {
+            fputs("Unable to schedule relaunch: \(error)\n", stderr)
+        }
+
+        NSApp.terminate(nil)
+    }
+
+    @objc private func quitApp() {
+        NSApp.terminate(nil)
+    }
+}
+
+private func relaunchCommand(afterPID pid: Int32) -> String {
+    let waitForExit = "while /bin/kill -0 \(pid) 2>/dev/null; do /bin/sleep 0.1; done"
+
+    if Bundle.main.bundleURL.pathExtension == "app" {
+        return "\(waitForExit); /usr/bin/open -n \(shellSingleQuote(Bundle.main.bundleURL.path))"
+    }
+
+    let executable = Bundle.main.executablePath ?? CommandLine.arguments[0]
+    let arguments = CommandLine.arguments.dropFirst().map(shellSingleQuote).joined(separator: " ")
+    let command = ([shellSingleQuote(executable)] + (arguments.isEmpty ? [] : [arguments])).joined(separator: " ")
+    return "\(waitForExit); \(command) >/dev/null 2>&1 &"
+}
+
+private func shellSingleQuote(_ value: String) -> String {
+    "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
 }
 
 private func requestAccessibilityIfNeeded() {

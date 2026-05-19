@@ -1,63 +1,114 @@
 # CmdScrollZoom
 
-Mini utilitaire macOS: transforme `Cmd + molette` en evenement de magnification, comme un pinch trackpad, sans les autres fonctions de Mac Mouse Fix.
+CmdScrollZoom is a small macOS utility that turns `Command + scroll wheel` into native magnification events, similar to a trackpad pinch gesture.
+
+It is meant for mice and apps that already support macOS pinch/magnification gestures, such as Safari, Preview, Maps, and many canvas or graphics apps.
+
+## Features
+
+- Menu-bar-only macOS app.
+- `Command + vertical scroll` emits native magnification events.
+- Horizontal scroll passes through unchanged.
+- Menu-bar actions for `Relaunch` and `Quit`.
+- Configurable modifier, sensitivity, inversion, and gesture end delay.
+- Diagnostic mode for Accessibility/event-tap troubleshooting.
+
+## Requirements
+
+- macOS 13 or newer.
+- Swift 5.9 or newer.
+- Accessibility permission in `System Settings > Privacy & Security > Accessibility`.
+- Input Monitoring permission may also be required on some macOS versions.
 
 ## Build
+
+Build the command-line executable:
 
 ```sh
 swift build -c release
 ```
 
-## App visible pour les permissions macOS
-
-Le plus simple est de construire le bundle `.app`:
+Build the `.app` bundle:
 
 ```sh
 scripts/build-app.sh
 open CmdScrollZoom.app
 ```
 
-L'app reste dans:
+The generated app bundle is intentionally ignored by Git.
+
+## Develop
+
+After changing code, rebuild and relaunch the app with:
 
 ```sh
-/Users/jonathan/Perso/CmdScrollZoom/CmdScrollZoom.app
+scripts/relaunch-app.sh
 ```
 
-Tu peux aussi la montrer directement dans Finder:
+The build script signs the app with the first available `Developer ID Application` identity, then the first available `Apple Development` identity. If no signing identity is available, it falls back to ad-hoc signing.
+
+You can override signing and bundle settings:
 
 ```sh
-open -R /Users/jonathan/Perso/CmdScrollZoom/CmdScrollZoom.app
+CODESIGN_IDENTITY="Apple Development: Your Name (TEAMID)" scripts/relaunch-app.sh
+APP_BUNDLE_IDENTIFIER="com.example.cmdscrollzoom" scripts/relaunch-app.sh
+APP_NAME="CmdScrollZoomDev" scripts/relaunch-app.sh
 ```
 
-Autorise `CmdScrollZoom.app` dans `System Settings > Privacy & Security > Accessibility`. Selon ta version de macOS, `Input Monitoring` peut aussi etre necessaire.
+macOS Accessibility permissions are tied to the app identity. If you change signing identity or bundle identifier, remove the old app entry from Accessibility once, relaunch, and approve the new identity.
 
-Si macOS continue a ouvrir les permissions alors que l'app est deja cochee, reset l'entree TCC:
+## Troubleshooting Permissions
+
+Run diagnostics:
+
+```sh
+CmdScrollZoom.app/Contents/MacOS/cmd-scroll-zoom --diagnose
+```
+
+Reset permissions for the current bundle identifier:
 
 ```sh
 scripts/reset-permissions.sh
 open CmdScrollZoom.app
 ```
 
-Diagnostic:
+Or reset a custom bundle identifier:
 
 ```sh
-CmdScrollZoom.app/Contents/MacOS/cmd-scroll-zoom --diagnose
+APP_BUNDLE_IDENTIFIER="com.example.cmdscrollzoom" scripts/reset-permissions.sh
 ```
 
-## Lancer
+## Command-Line Options
+
+Run the built executable directly:
 
 ```sh
 .build/release/cmd-scroll-zoom
 ```
 
-Options utiles:
+Useful options:
 
 ```sh
 .build/release/cmd-scroll-zoom --modifier ctrl
 .build/release/cmd-scroll-zoom --sensitivity 0.018
 .build/release/cmd-scroll-zoom --invert
+.build/release/cmd-scroll-zoom --diagnose
 ```
 
-macOS doit autoriser le binaire ou l'app dans `System Settings > Privacy & Security > Accessibility`. Selon la version de macOS, `Input Monitoring` peut aussi etre necessaire.
+Full usage:
 
-Le zoom fonctionne dans les apps qui reagissent au geste pinch/magnification macOS, par exemple Safari, Preview/Apercu, Maps, certains canvas et apps graphiques. Les apps qui n'ecoutent que `Cmd + +` ou leur propre systeme de zoom peuvent l'ignorer.
+```text
+cmd-scroll-zoom [--modifier cmd|ctrl|option|shift] [--sensitivity 0.012] [--invert] [--end-delay 0.08] [--diagnose]
+```
+
+## Limitations
+
+CmdScrollZoom only helps apps that respond to native macOS magnification events. Apps that implement zoom exclusively through `Command + +`, `Command + -`, or custom shortcuts may ignore it.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+CmdScrollZoom is available under the MIT License. See [LICENSE](LICENSE).
