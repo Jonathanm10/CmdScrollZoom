@@ -72,9 +72,9 @@ private final class CmdScrollZoom {
         didLogWaitingForPermissions = true
         fputs(
             """
-            En attente des permissions macOS.
-            Autorise CmdScrollZoom dans System Settings > Privacy & Security > Accessibility.
-            Selon ta version de macOS, Input Monitoring peut aussi etre necessaire.
+            Waiting for macOS permissions.
+            Allow CmdScrollZoom in System Settings > Privacy & Security > Accessibility.
+            Depending on your macOS version, Input Monitoring may also be required.
 
             """,
             stderr
@@ -82,7 +82,7 @@ private final class CmdScrollZoom {
     }
 
     private func logActive() {
-        print("cmd-scroll-zoom actif. \(modifierLabel(config.modifier)) + molette = pinch zoom.")
+        print("cmd-scroll-zoom is active. \(modifierLabel(config.modifier)) + scroll wheel = pinch zoom.")
     }
 
     private func installEventTap() -> Bool {
